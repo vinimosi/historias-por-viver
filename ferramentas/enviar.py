@@ -7,7 +7,8 @@ Lê o arquivo .env (que nunca vai para o GitHub) com:
 
 Uso:
   python ferramentas/enviar.py config   -> escreve docs/config.js
-  python ferramentas/enviar.py dados    -> envia dados/lugares/*.json para a tabela
+  python ferramentas/enviar.py dados [pasta] -> envia dados/<pasta>/*.json (padrão: novos) para a tabela
+  Cuidado: reenviar a pasta antiga "lugares" desfaz o que foi mudado pelo site.
 """
 import json, os, sys, glob, urllib.request
 
@@ -48,7 +49,7 @@ def dados(env):
     if not chave:
         sys.exit("Falta SUPABASE_SERVICE_KEY no .env.")
     linhas = []
-    for p in sorted(glob.glob(os.path.join(RAIZ, "dados", "lugares", "*.json"))):
+    for p in sorted(glob.glob(os.path.join(RAIZ, "dados", sys.argv[2] if len(sys.argv) > 2 else "novos", "*.json"))):
         d = json.load(open(p, encoding="utf-8"))
         d["id"] = os.path.splitext(os.path.basename(p))[0]
         linhas.append({k: d.get(k) for k in CAMPOS if k in d or k == "id"})
