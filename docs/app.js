@@ -324,23 +324,22 @@ function telaPost(l){
     <div class="eyebrow"><span class="${s}">${rotuloSit[s]}</span></div>
     <h2>${esc(p.titulo || l.nome)}</h2>
     ${p.linhafina ? `<p class="fina">${esc(p.linhafina)}</p>` : ""}`;
+  if (st.visitaEdit) h += `<form class="form visita-form" id="form-visita"><h2>Como foi?</h2>
+    <div class="notas" role="group" aria-label="Nota de 1 a 5">${[1,2,3,4,5].map(n => `<button type="button" data-nota="${n}" aria-pressed="${st.visitaEdit.nota===n}">${n}</button>`).join("")}</div>
+    <label>Comentário <span>opcional</span><textarea id="v-com" maxlength="800" placeholder="O que pediu, o que achou, se volta">${esc(st.visitaEdit.comentario||"")}</textarea></label>
+    <div class="linha-acoes"><button class="btn prim" type="submit">Guardar visita</button><button class="link" type="button" id="b-vcancel">Cancelar</button></div></form>`;
+  else if (st.podeEditar && s !== "fui") h += `<div class="marcar-visita"><button class="btn prim" id="b-fui">Já fui aqui</button><span>Marque a visita e dê uma nota de 1 a 5.</span></div>`;
+  if (l.visita && !st.visitaEdit) h += `<div class="visita"><b>Minha visita, ${esc(dataBR(l.visita.data))}${l.visita.nota ? " · " + l.visita.nota + "/5" : ""}</b>${l.visita.comentario ? `<p>${esc(l.visita.comentario)}</p>` : ""}
+    ${st.podeEditar ? `<div class="linha-acoes"><button class="link" id="b-editar-visita">Mudar a nota</button><button class="link" id="b-desfazer">Voltar para quero ir</button></div>` : ""}</div>`;
   if (fatos.length) h += `<dl class="fatos">${fatos.map(([k,v]) => `<div><dt>${k}</dt><span class="pontos"></span><dd>${esc(v)}</dd></div>`).join("")}</dl>`;
-  if (l.visita) h += `<div class="visita"><b>Minha visita, ${esc(dataBR(l.visita.data))}${l.visita.nota ? " · " + l.visita.nota + "/5" : ""}</b>${l.visita.comentario ? `<p>${esc(l.visita.comentario)}</p>` : ""}</div>`;
   if (l.porque || urlOk(l.tiktok)) h += `<div class="porque"><b>Por que entrou na lista</b>${l.porque ? esc(l.porque) : ""}${urlOk(l.tiktok) ? `${l.porque ? " " : ""}<a href="${esc(urlOk(l.tiktok))}" target="_blank" rel="noopener">Ver o vídeo</a>` : ""}</div>`;
   if (!l.post) h += `<div class="esperando-box">Este lugar ainda não foi pesquisado.</div>`;
   (p.paragrafos || []).forEach((x, i) => h += `<p${i === 0 ? ' class="abre"' : ""}>${esc(x)}</p>`);
   if (p.pedir?.length) h += `<h3>O que pedir</h3><ul>${p.pedir.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
   if (p.atencao?.length) h += `<h3>Bom saber</h3><ul>${p.atencao.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
   h += `<div class="acoes"><a class="btn" href="${esc(gmaps(l))}" target="_blank" rel="noopener">Abrir no Google Maps</a>`;
-  if (st.podeEditar){
-    h += s === "fui" ? `<button class="link" id="b-desfazer">Voltar para quero ir</button>` : `<button class="btn prim" id="b-fui">Já fui</button>`;
-    if (!temPonto(l) && !st.marcando) h += `<button class="btn" id="b-posicionar">Marcar no mapa</button>`;
-  }
+  if (st.podeEditar && !temPonto(l) && !st.marcando) h += `<button class="btn" id="b-posicionar">Marcar no mapa</button>`;
   h += `</div>`;
-  if (st.visitaEdit) h += `<form class="form" id="form-visita"><h2>Como foi?</h2>
-    <div class="notas" role="group" aria-label="Nota">${[1,2,3,4,5].map(n => `<button type="button" data-nota="${n}" aria-pressed="${st.visitaEdit.nota===n}">${n}</button>`).join("")}</div>
-    <label>Comentário <span>opcional</span><textarea id="v-com" maxlength="800">${esc(st.visitaEdit.comentario||"")}</textarea></label>
-    <div class="linha-acoes"><button class="btn prim" type="submit">Guardar visita</button><button class="link" type="button" id="b-vcancel">Cancelar</button></div></form>`;
   if (p.fontes?.length) h += `<div class="fontes">Pesquisado em ${esc(dataBR(p.pesquisado))}, a partir de:<ol>${p.fontes.map(f => `<li>${urlOk(f.url) ? `<a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.nome || f.url)}</a>` : esc(f.nome)}</li>`).join("")}</ol>Preços e horários mudam; confira antes de ir.</div>`;
   if (st.podeEditar) h += `<div class="acoes">${st.confirmaExcluir
       ? `<div class="confirma">Tirar ${esc(l.nome)} da lista? <button class="link perigo" id="b-excluir-sim">Tirar</button><button class="link" id="b-excluir-nao">Manter</button></div>`
@@ -413,6 +412,7 @@ painel.addEventListener("click", async e => {
     case "b-sugerir": case "b-sugerir-mais": st.sugerindo = true; st.sugerido = false; render(); document.getElementById("s-nome")?.focus(); break;
     case "b-sugerir-cancelar": st.sugerindo = false; render(); break;
     case "b-fui": st.visitaEdit = { nota:0, comentario:"" }; render(); break;
+    case "b-editar-visita": st.visitaEdit = { nota: l.visita?.nota || 0, comentario: l.visita?.comentario || "", data: l.visita?.data }; render(); break;
     case "b-vcancel": st.visitaEdit = null; render(); break;
     case "b-desfazer": await salvar(l.id, { status:"quero" }, true); break;
     case "b-posicionar": st.marcando = "existente"; dica.textContent = "Clique no mapa onde fica " + l.nome; dica.hidden = false; break;
@@ -450,7 +450,7 @@ painel.addEventListener("submit", async e => {
   }
   if (e.target.id === "form-visita"){
     const l = st.lugares[st.aberto];
-    const visita = { data: new Date().toISOString().slice(0,10), nota: st.visitaEdit.nota || null, comentario: v("v-com") };
+    const visita = { data: st.visitaEdit.data || new Date().toISOString().slice(0,10), nota: st.visitaEdit.nota || null, comentario: v("v-com") };
     if (await salvar(l.id, { status:"fui", visita }, true)){ st.visitaEdit = null; render(); }
   }
 });

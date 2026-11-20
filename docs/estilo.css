@@ -234,3 +234,9 @@ form.sugerir{border:0}
 .maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib{margin:0 0 8px 8px}
 @media (max-width:860px){.maplibregl-ctrl-bottom-left{bottom:auto;top:calc(8px + env(safe-area-inset-top, 0px))}}
 .post-botoes{display:flex;gap:6px}
+.marcar-visita{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 22px;padding:12px 14px;border:1px dashed var(--moss);border-radius:6px;background:color-mix(in srgb, var(--moss) 6%, transparent)}
+.marcar-visita .btn.prim{background:var(--moss);border-color:var(--moss)}
+.marcar-visita .btn.prim:hover{filter:brightness(1.1)}
+.marcar-visita span{font-style:italic;color:var(--muted);font-size:15px}
+.visita-form{margin:0 0 22px;padding:16px;border:1px solid var(--moss);border-radius:6px;background:var(--moss-soft)}
+.visita .linha-acoes{margin-top:8px}
