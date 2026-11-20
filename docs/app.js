@@ -2,10 +2,12 @@
 "use strict";
 const TABELA = "lugares";
 const st = { lugares:{}, carregado:false, semBanco:false, podeEditar:false, sessao:null, filtro:"todos", grupo:"", busca:"",
-  aberto:null, form:false, marcando:false, novoPos:null, confirmaExcluir:false, visitaEdit:null, aviso:"", entrando:false, linkEnviado:false };
-let sb = null, mapa = null, camPinos = null;
+  aberto:null, form:false, marcando:false, novoPos:null, confirmaExcluir:false, visitaEdit:null, aviso:"", entrando:false, linkEnviado:false,
+  posicao:null, ordem:"nome", sugestoes:[], sugerindo:false, sugerido:false, toast:"" };
+let sb = null, mapa = null, mapaPronto = false, popup = null, marcaEu = null, marcaNovo = null;
 const painel = document.getElementById("painel");
 const dica = document.getElementById("dica");
+const toastEl = document.getElementById("toast");
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const urlOk = u => /^https?:\/\//i.test(u||"") ? u : "";
@@ -15,6 +17,11 @@ const situacao = l => l.status === "fui" ? "fui" : (l.post ? "quero" : "esperand
 const rotuloSit = { quero:"quero ir", fui:"já fui", esperando:"esperando pesquisa" };
 const gmaps = l => "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent([l.nome, l.endereco || l.bairro, "São Paulo"].filter(Boolean).join(", "));
 const dataBR = s => { if(!s) return ""; const d = new Date(s); return isNaN(d) ? s : d.toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"}); };
+const temPonto = l => typeof l.lat === "number" && typeof l.lng === "number";
+function distKm(a, b){ const R = 6371, r = x => x * Math.PI / 180; const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const h = Math.sin(dLat/2)**2 + Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dLng/2)**2; return 2 * R * Math.asin(Math.sqrt(h)); }
+const km = d => d < 1 ? Math.round(d * 1000 / 50) * 50 + " m" : d.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " km";
+function avisar(msg){ toastEl.textContent = msg; toastEl.hidden = false; clearTimeout(avisar.t); avisar.t = setTimeout(() => toastEl.hidden = true, 2600); }
 
 const GRUPOS = [
   ["Japonesa", /japon|sushi|izakaya|yakitori|lámen|lamen/i],
@@ -33,50 +40,116 @@ const GRUPOS = [
 ];
 const grupoDe = l => { const t = l.tipo || ""; for (const [g, re] of GRUPOS) if (re.test(t)) return g; return "Outros"; };
 
-/* ---------- Mapa ---------- */
-function iniciarMapa(){
-  if (!window.L){ document.getElementById("mapa").innerHTML = '<p style="padding:24px;color:var(--muted);font-style:italic">O mapa não carregou. Recarregue a página.</p>'; return; }
-  mapa = L.map("mapa", { zoomSnap:0.5, minZoom:10, maxZoom:18 }).setView([-23.565, -46.66], 12.5);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-  }).addTo(mapa);
-  mapa.attributionControl.setPrefix(false);
-  camPinos = L.layerGroup().addTo(mapa);
+/* ---------- Mapa (MapLibre + OpenFreeMap, pintado nas cores do site) ---------- */
+const escuro = () => matchMedia("(prefers-color-scheme: dark)").matches;
+function paleta(){
+  return escuro()
+    ? { fundo:"#1B1511", uso:"#201914", parque:"#212616", agua:"#141A1A", predio:"#251D17", rua:"#33291F", ruaMaior:"#46382A", trilho:"#3A2F25", rotulo:"#A8957A", halo:"#1B1511", limite:"#4A3B2D",
+        quero:"#D69A4A", fui:"#A3AE78", borda:"#1B1511", grupo:"#D69A4A", grupoTexto:"#1B1511" }
+    : { fundo:"#EDE3D1", uso:"#E7DCC8", parque:"#DADDBF", agua:"#C7D2CB", predio:"#E3D6C0", rua:"#FAF4E8", ruaMaior:"#F6E7C9", trilho:"#D2C2A5", rotulo:"#6E5B45", halo:"#EDE3D1", limite:"#C8B391",
+        quero:"#9E5F1F", fui:"#56622F", borda:"#FAF4E8", grupo:"#9E5F1F", grupoTexto:"#FAF4E8" };
+}
+function pintarEstilo(estilo){
+  const c = paleta();
+  estilo.layers = estilo.layers.filter(l => !/shield|aeroway|airport|ice_shelf|glacier|country|label_state/.test(l.id));
+  for (const l of estilo.layers){
+    const p = l.paint = l.paint || {}; const sl = l["source-layer"];
+    if (l.type === "background") p["background-color"] = c.fundo;
+    else if (l.type === "fill"){
+      p["fill-color"] = sl === "water" ? c.agua : sl === "park" || l.id === "landcover_wood" ? c.parque : sl === "building" ? c.predio : sl === "landuse" ? c.uso : c.uso;
+      if (sl === "building") p["fill-opacity"] = .7;
+      delete p["fill-outline-color"];
+    } else if (l.type === "line"){
+      if (sl === "waterway") p["line-color"] = c.agua;
+      else if (sl === "boundary") p["line-color"] = c.limite;
+      else if (/railway/.test(l.id)) p["line-color"] = c.trilho;
+      else if (/casing/.test(l.id)) p["line-color"] = c.uso;
+      else if (/motorway|major/.test(l.id)) p["line-color"] = c.ruaMaior;
+      else p["line-color"] = c.rua;
+    } else if (l.type === "symbol"){
+      p["text-color"] = c.rotulo; p["text-halo-color"] = c.halo; p["text-halo-width"] = 1.4;
+    }
+  }
+  return estilo;
+}
+let estiloBase = null;
+async function iniciarMapa(){
+  if (!window.maplibregl){ document.getElementById("mapa").innerHTML = '<p class="mapa-erro">O mapa não carregou. Recarregue a página.</p>'; return; }
+  try { estiloBase = await (await fetch("https://tiles.openfreemap.org/styles/positron")).json(); }
+  catch(_){ document.getElementById("mapa").innerHTML = '<p class="mapa-erro">O mapa não carregou. Recarregue a página.</p>'; return; }
+  mapa = new maplibregl.Map({ container:"mapa", style: pintarEstilo(structuredClone(estiloBase)), center:[-46.665, -23.565], zoom:11.6, minZoom:9, maxZoom:18,
+    attributionControl:{ compact:true }, cooperativeGestures: matchMedia("(max-width:860px)").matches });
+  mapa.addControl(new maplibregl.NavigationControl({ showCompass:false }), "top-left");
+  popup = new maplibregl.Popup({ closeButton:false, closeOnClick:false, offset:12, className:"dica-pino" });
+  mapa.on("style.load", montarCamadas);
   mapa.on("click", cliqueMapa);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => { if (estiloBase) mapa.setStyle(pintarEstilo(structuredClone(estiloBase))); });
+}
+function dadosMapa(){
+  return { type:"FeatureCollection", features: visiveis().filter(temPonto).map(l => ({ type:"Feature", geometry:{ type:"Point", coordinates:[l.lng, l.lat] },
+    properties:{ id:l.id, nome:l.nome, sit: situacao(l) === "fui" ? "fui" : "quero", sub:[l.tipo, l.bairro].filter(Boolean).join(" · ") } })) };
+}
+function montarCamadas(){
+  const c = paleta();
+  mapa.addSource("lugares", { type:"geojson", data: dadosMapa(), cluster:true, clusterRadius:38, clusterMaxZoom:14 });
+  mapa.addLayer({ id:"grupos", type:"circle", source:"lugares", filter:["has","point_count"],
+    paint:{ "circle-color": c.grupo, "circle-opacity": .92, "circle-stroke-color": c.borda, "circle-stroke-width": 2,
+      "circle-radius": ["step", ["get","point_count"], 15, 5, 18, 12, 23, 25, 28] } });
+  mapa.addLayer({ id:"grupos-num", type:"symbol", source:"lugares", filter:["has","point_count"],
+    layout:{ "text-field":["get","point_count_abbreviated"], "text-font":["Noto Sans Bold"], "text-size":13, "text-allow-overlap":true },
+    paint:{ "text-color": c.grupoTexto } });
+  mapa.addLayer({ id:"ativo", type:"circle", source:"lugares", filter:["==",["get","id"], st.aberto || ""],
+    paint:{ "circle-radius": 13, "circle-color":"transparent", "circle-stroke-color": c.quero, "circle-stroke-width": 2, "circle-stroke-opacity": .6 } });
+  mapa.addLayer({ id:"pontos", type:"circle", source:"lugares", filter:["!",["has","point_count"]],
+    paint:{ "circle-color":["match",["get","sit"],"fui", c.fui, c.quero], "circle-stroke-color": c.borda, "circle-stroke-width": 2,
+      "circle-radius":["interpolate",["linear"],["zoom"], 10, 4.5, 14, 7, 17, 9] } });
+  mapa.addLayer({ id:"nomes", type:"symbol", source:"lugares", filter:["!",["has","point_count"]], minzoom:14.5,
+    layout:{ "text-field":["get","nome"], "text-font":["Noto Sans Bold"], "text-size":12, "text-offset":[0, 1.1], "text-anchor":"top", "text-optional":true },
+    paint:{ "text-color": c.rotulo, "text-halo-color": c.halo, "text-halo-width": 1.6 } });
+  if (!mapaPronto){
+    mapa.on("click", "grupos", async e => {
+      const f = e.features[0]; const z = await mapa.getSource("lugares").getClusterExpansionZoom(f.properties.cluster_id);
+      mapa.easeTo({ center: f.geometry.coordinates, zoom: z + .3 });
+    });
+    mapa.on("click", "pontos", e => { e.preventDefault(); abrir(e.features[0].properties.id); });
+    for (const camada of ["grupos", "pontos"]){
+      mapa.on("mouseenter", camada, () => mapa.getCanvas().style.cursor = "pointer");
+      mapa.on("mouseleave", camada, () => { mapa.getCanvas().style.cursor = ""; popup.remove(); });
+    }
+    mapa.on("mousemove", "pontos", e => { const p = e.features[0].properties;
+      popup.setLngLat(e.features[0].geometry.coordinates).setHTML(`<b>${esc(p.nome)}</b>${p.sub ? `<span>${esc(p.sub)}</span>` : ""}`).addTo(mapa); });
+  }
+  mapaPronto = true;
+  enquadrar(true);
+}
+let enquadrado = false;
+function enquadrar(forcar){
+  if (!mapaPronto || (enquadrado && !forcar) || st.aberto) return;
+  const pts = visiveis().filter(temPonto); if (!pts.length) return;
+  const b = new maplibregl.LngLatBounds(); pts.forEach(l => b.extend([l.lng, l.lat]));
+  mapa.fitBounds(b, { padding: 50, maxZoom: 15, duration: enquadrado ? 600 : 0 }); enquadrado = true;
+}
+function atualizarMapa(){
+  if (!mapaPronto) return;
+  mapa.getSource("lugares")?.setData(dadosMapa());
+  mapa.setFilter("ativo", ["==",["get","id"], st.aberto || ""]);
+  if (marcaNovo){ marcaNovo.remove(); marcaNovo = null; }
+  if (st.novoPos){ const el = document.createElement("div"); el.className = "marca-nova"; marcaNovo = new maplibregl.Marker({ element: el }).setLngLat([st.novoPos.lng, st.novoPos.lat]).addTo(mapa); }
 }
 async function cliqueMapa(e){
-  if (!st.marcando) return;
-  const pos = { lat:+e.latlng.lat.toFixed(5), lng:+e.latlng.lng.toFixed(5) };
+  if (e.defaultPrevented || !st.marcando) return;
+  const pos = { lat:+e.lngLat.lat.toFixed(5), lng:+e.lngLat.lng.toFixed(5) };
   const modo = st.marcando;
   st.marcando = false; dica.hidden = true;
   if (modo === "existente"){ await salvar(st.aberto, pos, true); return; }
   st.novoPos = pos; render(); restaurarRascunho();
 }
-let enquadrado = false;
-function enquadrar(){
-  if (enquadrado || !mapa) return;
-  const pts = todos().filter(l => typeof l.lat === "number").map(l => [l.lat, l.lng]);
-  if (pts.length){ mapa.fitBounds(L.latLngBounds(pts).pad(0.05), { maxZoom:15 }); enquadrado = true; }
-}
-function desenharPinos(){
-  if (!mapa) return;
-  if (!st.aberto) enquadrar();
-  camPinos.clearLayers();
-  for (const l of visiveis()){
-    if (typeof l.lat !== "number" || typeof l.lng !== "number") continue;
-    const m = L.marker([l.lat, l.lng], { title: l.nome, riseOnHover:true,
-      icon: L.divIcon({ className: "pino" + (situacao(l) === "fui" ? " fui" : "") + (st.aberto === l.id ? " ativo" : ""), html:"<span></span>", iconSize:null }) });
-    m.on("click", () => abrir(l.id));
-    camPinos.addLayer(m);
-  }
-  if (st.novoPos) camPinos.addLayer(L.marker([st.novoPos.lat, st.novoPos.lng], { interactive:false, icon: L.divIcon({ className:"pino ativo", html:"<span></span>", iconSize:null }) }));
-}
 
 /* ---------- Dados ---------- */
-function todos(){ return Object.values(st.lugares).sort((a,b) => (a.nome||"").localeCompare(b.nome||"", "pt-BR")); }
+function todos(){ return Object.values(st.lugares); }
 function visiveis(){
   const q = st.busca.trim().toLowerCase();
-  return todos().filter(l => {
+  const lista = todos().filter(l => {
     const s = situacao(l);
     if (st.filtro === "quero" && s === "fui") return false;
     if (st.filtro === "fui" && s !== "fui") return false;
@@ -84,6 +157,8 @@ function visiveis(){
     if (q && ![l.nome,l.bairro,l.tipo,l.endereco,l.post?.linhafina].join(" ").toLowerCase().includes(q)) return false;
     return true;
   });
+  if (st.ordem === "perto" && st.posicao) return lista.sort((a,b) => (temPonto(a) ? distKm(st.posicao, a) : 1e9) - (temPonto(b) ? distKm(st.posicao, b) : 1e9));
+  return lista.sort((a,b) => (a.nome||"").localeCompare(b.nome||"", "pt-BR"));
 }
 async function carregar(){
   const { data, error } = await sb.from(TABELA).select("*");
@@ -93,7 +168,13 @@ async function carregar(){
   if (st.aberto && !novo[st.aberto]) st.aberto = null;
   const h = decodeURIComponent(location.hash.slice(1));
   if (!st.aberto && h && novo[h]){ abrir(h); return; }
-  if (!st.form) render(); else desenharPinos();
+  if (!st.form && !st.sugerindo) render(); else atualizarMapa();
+  enquadrar();
+}
+async function carregarSugestoes(){
+  if (!st.podeEditar){ st.sugestoes = []; return; }
+  const { data } = await sb.from("sugestoes").select("*").order("criado", { ascending:false });
+  st.sugestoes = data || [];
 }
 async function salvar(id, dados, mudar){
   const q = mudar ? sb.from(TABELA).update(dados).eq("id", id) : sb.from(TABELA).insert(Object.assign({ id }, dados));
@@ -112,7 +193,7 @@ async function verEditor(){
 function render(){
   const l = st.aberto && st.lugares[st.aberto];
   painel.innerHTML = l ? telaPost(l) : telaLista();
-  desenharPinos();
+  atualizarMapa();
 }
 function telaLista(){
   const t = todos();
@@ -122,17 +203,23 @@ function telaLista(){
   const grupos = GRUPOS.map(g => g[0]).concat("Outros").filter(g => contaGrupo[g]);
   const vis = visiveis();
   let h = `<header class="topo"><div><h1>Histórias por viver</h1>
-    <p class="sub">Os lugares que apareceram no caminho, anotados para um dia.</p>
+    <p class="sub">Restaurantes, bares e cafés de São Paulo que ainda vão virar história.</p>
     <div class="contagem"><i style="background:var(--accent)"></i>${t.length - nFui} para ir &nbsp; <i style="background:var(--moss)"></i>${nFui} visitados${nEsp ? ` &nbsp; ${nEsp} esperando pesquisa` : ""}</div></div>
     ${st.podeEditar && !st.form ? `<button class="btn prim" id="b-novo">Anotar lugar</button>` : ""}</header>`;
   if (st.aviso) h += `<div class="aviso" role="status">${esc(st.aviso)}</div>`;
   if (st.semBanco) h += `<div class="aviso">O site ainda não está ligado ao banco de dados.</div>`;
   if (st.form) h += telaForm();
+  if (st.podeEditar && st.sugestoes.length) h += telaSugestoesRecebidas();
   if (t.length){
     h += `<div class="filtros">
       <div class="abas" role="group" aria-label="Mostrar">${[["todos","Todos"],["quero","Quero ir"],["fui","Já fui"]].map(([k,n]) => `<button data-filtro="${k}" aria-pressed="${st.filtro===k}">${n}</button>`).join("")}</div>
       <input class="busca" id="busca" type="search" placeholder="Procurar por nome, bairro ou comida" value="${esc(st.busca)}" aria-label="Procurar">
       ${grupos.length > 1 ? `<div class="grupos">${grupos.map(g => `<button data-grupo="${esc(g)}" aria-pressed="${st.grupo===g}">${esc(g)} <span>${contaGrupo[g]}</span></button>`).join("")}</div>` : ""}
+      <div class="ferramentas">
+        <button class="chip" id="b-sortear">Me surpreenda</button>
+        <button class="chip" id="b-perto" aria-pressed="${st.ordem === "perto"}">${st.ordem === "perto" ? "Mais perto de você" : "Perto de mim"}</button>
+        <span class="conta-vis">${vis.length} ${vis.length === 1 ? "lugar" : "lugares"}</span>
+      </div>
     </div>`;
     h += vis.length ? `<ul class="lista">${vis.map(itemLista).join("")}</ul>` : `<p class="vazio">Nada por aqui com esse filtro.</p>`;
   } else if (st.carregado && !st.form){
@@ -140,8 +227,29 @@ function telaLista(){
   } else if (!st.carregado && !st.semBanco){
     h += `<p class="vazio">Abrindo o caderno…</p>`;
   }
+  if (!st.podeEditar && !st.semBanco) h += telaSugerir();
   h += telaEntrar();
   return h;
+}
+function telaSugerir(){
+  if (st.sugerido) return `<section class="sugerir"><h2>Obrigada pela dica</h2><p>A sugestão chegou e vai ser lida com carinho.</p><button class="link" id="b-sugerir-mais">Sugerir outro lugar</button></section>`;
+  if (!st.sugerindo) return `<section class="sugerir"><h2>Conhece um lugar que devia estar aqui?</h2><p>Manda a dica. Se for bom mesmo, ele entra no mapa.</p><button class="btn" id="b-sugerir">Sugerir um lugar</button></section>`;
+  return `<form class="form sugerir" id="form-sugerir">
+    <h2>Sugerir um lugar</h2>
+    <label>Nome do lugar<input id="s-nome" required minlength="2" maxlength="120" placeholder="Padaria da esquina"></label>
+    <label>Link <span>do vídeo, do Instagram ou do Google Maps</span><input id="s-link" type="url" maxlength="500" placeholder="https://"></label>
+    <label>Seu nome <span>opcional</span><input id="s-quem" maxlength="60"></label>
+    <label>Por que vale a pena <span>opcional</span><textarea id="s-coment" maxlength="600"></textarea></label>
+    <div class="linha-acoes"><button class="btn prim" type="submit">Mandar sugestão</button><button class="link" type="button" id="b-sugerir-cancelar">Cancelar</button></div>
+  </form>`;
+}
+function telaSugestoesRecebidas(){
+  return `<section class="recebidas"><h2>Sugestões dos amigos <span>${st.sugestoes.length}</span></h2><ul>${st.sugestoes.map(s => `<li>
+    <div><b>${esc(s.nome)}</b>${s.quem ? ` <span class="de">por ${esc(s.quem)}</span>` : ""}</div>
+    ${s.comentario ? `<p>${esc(s.comentario)}</p>` : ""}
+    ${urlOk(s.link) ? `<a href="${esc(s.link)}" target="_blank" rel="noopener">Ver o link</a>` : ""}
+    <div class="linha-acoes"><button class="link" data-aceitar="${esc(s.id)}">Pôr na lista</button><button class="link perigo" data-descartar="${esc(s.id)}">Descartar</button></div>
+  </li>`).join("")}</ul></section>`;
 }
 function telaEntrar(){
   if (st.semBanco) return "";
@@ -155,10 +263,11 @@ function itemLista(l){
   const s = situacao(l);
   const meta = [l.tipo, l.bairro].filter(Boolean).join(", ");
   const resumo = l.post?.linhafina || l.porque || "";
+  const dist = st.ordem === "perto" && st.posicao && temPonto(l) ? `<span class="dist">${km(distKm(st.posicao, l))}</span>` : "";
   const selo = s === "fui" ? `<span class="selo fui">já fui${l.visita?.nota ? " · " + l.visita.nota + "/5" : ""}</span>` : s === "esperando" ? `<span class="selo esperando">esperando pesquisa</span>` : "";
   return `<li class="item" data-abrir="${esc(l.id)}" tabindex="0" role="button" aria-label="Abrir ${esc(l.nome)}">
     <div class="linha"><h3>${esc(l.nome)}</h3><span class="pontos"></span><span class="preco">${preco(l.preco)}</span></div>
-    <div class="meta">${meta ? `<span>${esc(meta)}</span>` : ""}${selo}</div>
+    <div class="meta">${meta ? `<span>${esc(meta)}</span>` : ""}${dist}${selo}</div>
     ${resumo ? `<p class="resumo">${esc(resumo)}</p>` : ""}</li>`;
 }
 function telaForm(){
@@ -175,13 +284,15 @@ function telaForm(){
 }
 function telaPost(l){
   const s = situacao(l), p = l.post || {};
-  const fatos = [["Comida", l.tipo], ["Bairro", l.bairro], ["Endereço", l.endereco], ["Preço", preco(l.preco) && preco(l.preco) + (p.preco_txt ? ", " + p.preco_txt : "")], ["Fama", p.nota_publica], ["Horário", p.horario]].filter(x => x[1]);
-  let h = `<button class="link voltar" id="b-voltar">Voltar para a lista</button><article class="post">
+  const dist = st.posicao && temPonto(l) ? km(distKm(st.posicao, l)) + " de você" : "";
+  const fatos = [["Comida", l.tipo], ["Bairro", l.bairro], ["Endereço", l.endereco], ["Distância", dist], ["Preço", preco(l.preco) && preco(l.preco) + (p.preco_txt ? ", " + p.preco_txt : "")], ["Fama", p.nota_publica], ["Horário", p.horario]].filter(x => x[1]);
+  let h = `<div class="post-topo"><button class="link voltar" id="b-voltar">Voltar para a lista</button>
+    <button class="chip" id="b-compartilhar">Compartilhar</button></div><article class="post">
     <div class="eyebrow"><span class="${s}">${rotuloSit[s]}</span></div>
     <h2>${esc(p.titulo || l.nome)}</h2>
     ${p.linhafina ? `<p class="fina">${esc(p.linhafina)}</p>` : ""}`;
   if (fatos.length) h += `<dl class="fatos">${fatos.map(([k,v]) => `<div><dt>${k}</dt><span class="pontos"></span><dd>${esc(v)}</dd></div>`).join("")}</dl>`;
-  if (l.visita) h += `<div class="visita"><b>Minha visita, ${esc(dataBR(l.visita.data))}${l.visita.nota ? " · " + l.visita.nota + "/5" : ""}</b>${l.visita.comentario ? `<p style="margin:6px 0 0;font-size:17px">${esc(l.visita.comentario)}</p>` : ""}</div>`;
+  if (l.visita) h += `<div class="visita"><b>Minha visita, ${esc(dataBR(l.visita.data))}${l.visita.nota ? " · " + l.visita.nota + "/5" : ""}</b>${l.visita.comentario ? `<p>${esc(l.visita.comentario)}</p>` : ""}</div>`;
   if (l.porque || urlOk(l.tiktok)) h += `<div class="porque"><b>Por que entrou na lista</b>${l.porque ? esc(l.porque) : ""}${urlOk(l.tiktok) ? `${l.porque ? " " : ""}<a href="${esc(urlOk(l.tiktok))}" target="_blank" rel="noopener">Ver o vídeo</a>` : ""}</div>`;
   if (!l.post) h += `<div class="esperando-box">Este lugar ainda não foi pesquisado.</div>`;
   (p.paragrafos || []).forEach((x, i) => h += `<p${i === 0 ? ' class="abre"' : ""}>${esc(x)}</p>`);
@@ -190,7 +301,7 @@ function telaPost(l){
   h += `<div class="acoes"><a class="btn" href="${esc(gmaps(l))}" target="_blank" rel="noopener">Abrir no Google Maps</a>`;
   if (st.podeEditar){
     h += s === "fui" ? `<button class="link" id="b-desfazer">Voltar para quero ir</button>` : `<button class="btn prim" id="b-fui">Já fui</button>`;
-    if (typeof l.lat !== "number" && !st.marcando) h += `<button class="btn" id="b-posicionar">Marcar no mapa</button>`;
+    if (!temPonto(l) && !st.marcando) h += `<button class="btn" id="b-posicionar">Marcar no mapa</button>`;
   }
   h += `</div>`;
   if (st.visitaEdit) h += `<form class="form" id="form-visita"><h2>Como foi?</h2>
@@ -210,24 +321,60 @@ function abrir(id){
   render(); painel.scrollTop = 0;
   if (window.innerWidth <= 860) painel.scrollIntoView({ behavior:"smooth", block:"start" });
   const l = st.lugares[id];
-  if (mapa && l && typeof l.lat === "number") mapa.flyTo([l.lat, l.lng], Math.max(mapa.getZoom(), 15), { duration:.6 });
+  if (mapaPronto && l && temPonto(l)) mapa.flyTo({ center:[l.lng, l.lat], zoom: Math.max(mapa.getZoom(), 15), duration: 900 });
 }
 function fechar(){ st.aberto = null; st.confirmaExcluir = false; st.visitaEdit = null; if (location.hash) history.replaceState(null, "", location.pathname + location.search); render(); }
 window.addEventListener("hashchange", () => { const id = decodeURIComponent(location.hash.slice(1)); if (id && st.lugares[id]) abrir(id); else if (!id && st.aberto) fechar(); });
+
+async function compartilhar(l){
+  const url = location.origin + location.pathname + "#" + encodeURIComponent(l.id);
+  const texto = (l.post?.linhafina || l.tipo || "") + "";
+  if (navigator.share){ try { await navigator.share({ title: l.nome + " · Histórias por viver", text: texto, url }); return; } catch(e){ if (e && e.name === "AbortError") return; } }
+  try { await navigator.clipboard.writeText(url); avisar("Link copiado"); } catch(_){ prompt("Copie o link:", url); }
+}
+function pertoDeMim(){
+  if (st.ordem === "perto"){ st.ordem = "nome"; render(); return; }
+  if (!navigator.geolocation){ avisar("Este navegador não informa a localização"); return; }
+  avisar("Procurando onde você está…");
+  navigator.geolocation.getCurrentPosition(p => {
+    st.posicao = { lat: p.coords.latitude, lng: p.coords.longitude }; st.ordem = "perto"; render();
+    if (mapaPronto){
+      if (!marcaEu){ const el = document.createElement("div"); el.className = "marca-eu"; el.title = "Você"; marcaEu = new maplibregl.Marker({ element: el }).setLngLat([st.posicao.lng, st.posicao.lat]).addTo(mapa); }
+      else marcaEu.setLngLat([st.posicao.lng, st.posicao.lat]);
+      mapa.flyTo({ center:[st.posicao.lng, st.posicao.lat], zoom: 13.5 });
+    }
+    toastEl.hidden = true;
+  }, () => avisar("Não deu para saber onde você está"), { enableHighAccuracy:true, timeout:10000, maximumAge:60000 });
+}
+function sortear(){
+  const op = visiveis().filter(l => situacao(l) !== "fui");
+  if (!op.length){ avisar("Nenhum lugar para sortear com esse filtro"); return; }
+  const l = op[Math.floor(Math.random() * op.length)];
+  avisar("Que tal " + l.nome + "?"); abrir(l.id);
+}
 
 /* ---------- Eventos ---------- */
 painel.addEventListener("click", async e => {
   const t = e.target.closest("button, [data-abrir]"); if (!t) return;
   const l = st.aberto && st.lugares[st.aberto];
   if (t.dataset.abrir) return abrir(t.dataset.abrir);
-  if (t.dataset.filtro){ st.filtro = t.dataset.filtro; return render(); }
-  if (t.dataset.grupo !== undefined){ st.grupo = st.grupo === t.dataset.grupo ? "" : t.dataset.grupo; return render(); }
+  if (t.dataset.filtro){ st.filtro = t.dataset.filtro; render(); enquadrar(true); return; }
+  if (t.dataset.grupo !== undefined){ st.grupo = st.grupo === t.dataset.grupo ? "" : t.dataset.grupo; render(); enquadrar(true); return; }
   if (t.dataset.nota){ st.visitaEdit.nota = +t.dataset.nota; st.visitaEdit.comentario = document.getElementById("v-com").value; return render(); }
+  if (t.dataset.aceitar){ const s = st.sugestoes.find(x => String(x.id) === t.dataset.aceitar); if (!s) return;
+    const ok = await salvar(slug(s.nome) + "-" + Math.random().toString(36).slice(2,6), { nome: s.nome, tiktok: urlOk(s.link) || null, porque: "Sugestão" + (s.quem ? " de " + s.quem : "") + (s.comentario ? ": " + s.comentario : "."), status:"quero" });
+    if (ok){ await sb.from("sugestoes").delete().eq("id", s.id); await carregarSugestoes(); render(); avisar("Entrou na lista, esperando pesquisa"); } return; }
+  if (t.dataset.descartar){ await sb.from("sugestoes").delete().eq("id", t.dataset.descartar); await carregarSugestoes(); render(); return; }
   switch (t.id){
     case "b-novo": st.form = true; st.novoPos = null; render(); document.getElementById("f-nome")?.focus(); break;
     case "b-cancelar": st.form = false; st.novoPos = null; st.marcando = false; dica.hidden = true; render(); break;
     case "b-marcar": guardarRascunho(); st.marcando = true; dica.textContent = "Clique no mapa onde fica o lugar"; dica.hidden = false; break;
     case "b-voltar": fechar(); break;
+    case "b-compartilhar": compartilhar(l); break;
+    case "b-sortear": sortear(); break;
+    case "b-perto": pertoDeMim(); break;
+    case "b-sugerir": case "b-sugerir-mais": st.sugerindo = true; st.sugerido = false; render(); document.getElementById("s-nome")?.focus(); break;
+    case "b-sugerir-cancelar": st.sugerindo = false; render(); break;
     case "b-fui": st.visitaEdit = { nota:0, comentario:"" }; render(); break;
     case "b-vcancel": st.visitaEdit = null; render(); break;
     case "b-desfazer": await salvar(l.id, { status:"quero" }, true); break;
@@ -246,14 +393,18 @@ function guardarRascunho(){ ["f-nome","f-end","f-tt","f-porque"].forEach(k => { 
 function restaurarRascunho(){ ["f-nome","f-end","f-tt","f-porque"].forEach(k => { const el = document.getElementById(k); if (el && rascunho[k]) el.value = rascunho[k]; }); }
 painel.addEventListener("submit", async e => {
   e.preventDefault();
+  const v = k => (document.getElementById(k)?.value || "").trim();
   if (e.target.id === "form-entrar"){
-    const email = document.getElementById("e-mail").value.trim();
-    const { error } = await sb.auth.signInWithOtp({ email, options:{ shouldCreateUser:false, emailRedirectTo: location.origin + location.pathname } });
+    const { error } = await sb.auth.signInWithOtp({ email: v("e-mail"), options:{ shouldCreateUser:false, emailRedirectTo: location.origin + location.pathname } });
     if (error){ st.aviso = "Esse e-mail não tem acesso para editar."; render(); return; }
     st.linkEnviado = true; st.entrando = false; render();
   }
+  if (e.target.id === "form-sugerir"){
+    const { error } = await sb.from("sugestoes").insert({ nome: v("s-nome"), link: v("s-link") || null, quem: v("s-quem") || null, comentario: v("s-coment") || null });
+    if (error){ avisar("Não deu para mandar agora. Tente de novo."); return; }
+    st.sugerindo = false; st.sugerido = true; render();
+  }
   if (e.target.id === "form-novo"){
-    const v = k => document.getElementById(k).value.trim();
     const nome = v("f-nome"); if (!nome) return;
     const id = slug(nome) + "-" + Math.random().toString(36).slice(2,6);
     const dados = { nome, endereco: v("f-end"), tiktok: v("f-tt"), porque: v("f-porque"), status:"quero" };
@@ -262,7 +413,7 @@ painel.addEventListener("submit", async e => {
   }
   if (e.target.id === "form-visita"){
     const l = st.lugares[st.aberto];
-    const visita = { data: new Date().toISOString().slice(0,10), nota: st.visitaEdit.nota || null, comentario: document.getElementById("v-com").value.trim() };
+    const visita = { data: new Date().toISOString().slice(0,10), nota: st.visitaEdit.nota || null, comentario: v("v-com") };
     if (await salvar(l.id, { status:"fui", visita }, true)){ st.visitaEdit = null; render(); }
   }
 });
@@ -272,15 +423,11 @@ iniciarMapa();
 render();
 (async () => {
   const cfg = window.SUPABASE;
-  if (!cfg || !cfg.url || !window.supabase){
-    // Teste local: com ?amostra, lê amostra.json (arquivo que só existe no PC).
-    if (location.search === "?amostra"){ try { const d = await (await fetch("amostra.json")).json(); d.forEach(l => st.lugares[l.id] = l); st.carregado = true; st.podeEditar = true; render(); return; } catch(_){} }
-    st.semBanco = true; render(); return;
-  }
+  if (!cfg || !cfg.url || !window.supabase){ st.semBanco = true; render(); return; }
   sb = window.supabase.createClient(cfg.url, cfg.chave);
   const { data } = await sb.auth.getSession();
-  st.sessao = data.session; await verEditor();
-  sb.auth.onAuthStateChange(async (_ev, sessao) => { st.sessao = sessao; await verEditor(); render(); });
+  st.sessao = data.session; await verEditor(); await carregarSugestoes();
+  sb.auth.onAuthStateChange(async (_ev, sessao) => { st.sessao = sessao; await verEditor(); await carregarSugestoes(); render(); });
   await carregar();
 })();
 })();
