@@ -30,7 +30,10 @@
     <div id="mapa" role="region" aria-label="Mapa de São Paulo"></div>
     <div class="mapa-dica" id="dica" hidden>Clique no mapa onde fica o lugar</div>
   </div>
-  <main class="painel" id="painel"></main>
+  <div class="folha" id="folha" data-altura="baixo">
+    <button class="alca" id="alca" aria-label="Abrir ou fechar a lista"></button>
+    <main class="painel" id="painel"></main>
+  </div>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>

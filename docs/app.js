@@ -8,6 +8,37 @@ let sb = null, mapa = null, mapaPronto = false, popup = null, marcaEu = null, ma
 const painel = document.getElementById("painel");
 const dica = document.getElementById("dica");
 const toastEl = document.getElementById("toast");
+const folha = document.getElementById("folha");
+const alca = document.getElementById("alca");
+const celular = () => matchMedia("(max-width:860px)").matches;
+
+/* ---------- Gaveta do celular ---------- */
+function altura(a){ folha.dataset.altura = a; if (a === "baixo") painel.scrollTop = 0; }
+function folgaMapa(){
+  // Espaço que a lista ocupa por cima do mapa, para centralizar os pontos no que sobra visível.
+  if (celular()) return { top: 60, left: 30, right: 30, bottom: Math.round(folha.getBoundingClientRect().height * .46) + 20 };
+  return { top: 50, left: 60, bottom: 50, right: folha.getBoundingClientRect().width + 60 };
+}
+(function arrastar(){
+  let y0 = null, t0 = 0, base = 0, moveu = false;
+  const H = () => folha.getBoundingClientRect().height;
+  alca.addEventListener("pointerdown", e => { y0 = e.clientY; t0 = Date.now(); moveu = false; base = folha.dataset.altura === "alto" ? 0 : H() * .54; folha.classList.add("arrastando"); alca.setPointerCapture(e.pointerId); });
+  alca.addEventListener("pointermove", e => { if (y0 === null) return; const dy = e.clientY - y0; if (Math.abs(dy) > 4) moveu = true;
+    folha.style.transform = `translateY(${Math.min(H() * .54, Math.max(0, base + dy))}px)`; });
+  const soltar = e => { if (y0 === null) return; const dy = e.clientY - y0, rapido = Date.now() - t0 < 250;
+    folha.classList.remove("arrastando"); folha.style.transform = "";
+    if (!moveu) altura(folha.dataset.altura === "alto" ? "baixo" : "alto");
+    else if (dy < -40 || (rapido && dy < 0)) altura("alto"); else if (dy > 40 || (rapido && dy > 0)) altura("baixo");
+    y0 = null; };
+  alca.addEventListener("pointerup", soltar); alca.addEventListener("pointercancel", soltar);
+  // Na gaveta baixa, rolar a lista para cima abre a gaveta.
+  painel.addEventListener("wheel", e => { if (celular() && folha.dataset.altura === "baixo" && e.deltaY > 0) altura("alto"); }, { passive:true });
+  let ty = null;
+  painel.addEventListener("touchstart", e => { ty = e.touches[0].clientY; }, { passive:true });
+  painel.addEventListener("touchmove", e => { if (ty === null || !celular()) return; const dy = e.touches[0].clientY - ty;
+    if (folha.dataset.altura === "baixo" && dy < -24){ altura("alto"); ty = null; }
+    else if (folha.dataset.altura === "alto" && painel.scrollTop <= 0 && dy > 60){ altura("baixo"); ty = null; } }, { passive:true });
+})();
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const urlOk = u => /^https?:\/\//i.test(u||"") ? u : "";
@@ -78,8 +109,10 @@ async function iniciarMapa(){
   try { estiloBase = await (await fetch("https://tiles.openfreemap.org/styles/positron")).json(); }
   catch(_){ document.getElementById("mapa").innerHTML = '<p class="mapa-erro">O mapa não carregou. Recarregue a página.</p>'; return; }
   mapa = new maplibregl.Map({ container:"mapa", style: pintarEstilo(structuredClone(estiloBase)), center:[-46.665, -23.565], zoom:11.6, minZoom:9, maxZoom:18,
-    attributionControl:{ compact:true }, cooperativeGestures: matchMedia("(max-width:860px)").matches });
+    attributionControl:false });
+  mapa.addControl(new maplibregl.AttributionControl({ compact:true }), "bottom-left");
   mapa.addControl(new maplibregl.NavigationControl({ showCompass:false }), "top-left");
+  mapa.on("dragstart", () => { if (celular() && folha.dataset.altura === "alto") altura("baixo"); });
   popup = new maplibregl.Popup({ closeButton:false, closeOnClick:false, offset:12, className:"dica-pino" });
   mapa.on("style.load", montarCamadas);
   mapa.on("click", cliqueMapa);
@@ -127,7 +160,7 @@ function enquadrar(forcar){
   if (!mapaPronto || (enquadrado && !forcar) || st.aberto) return;
   const pts = visiveis().filter(temPonto); if (!pts.length) return;
   const b = new maplibregl.LngLatBounds(); pts.forEach(l => b.extend([l.lng, l.lat]));
-  mapa.fitBounds(b, { padding: 50, maxZoom: 15, duration: enquadrado ? 600 : 0 }); enquadrado = true;
+  mapa.fitBounds(b, { padding: folgaMapa(), maxZoom: 15, duration: enquadrado ? 600 : 0 }); enquadrado = true;
 }
 function atualizarMapa(){
   if (!mapaPronto) return;
@@ -287,7 +320,7 @@ function telaPost(l){
   const dist = st.posicao && temPonto(l) ? km(distKm(st.posicao, l)) + " de você" : "";
   const fatos = [["Comida", l.tipo], ["Bairro", l.bairro], ["Endereço", l.endereco], ["Distância", dist], ["Preço", preco(l.preco) && preco(l.preco) + (p.preco_txt ? ", " + p.preco_txt : "")], ["Fama", p.nota_publica], ["Horário", p.horario]].filter(x => x[1]);
   let h = `<div class="post-topo"><button class="link voltar" id="b-voltar">Voltar para a lista</button>
-    <button class="chip" id="b-compartilhar">Compartilhar</button></div><article class="post">
+    <span class="post-botoes">${temPonto(l) ? `<button class="chip ver-mapa" id="b-ver-mapa">Ver no mapa</button>` : ""}<button class="chip" id="b-compartilhar">Compartilhar</button></span></div><article class="post">
     <div class="eyebrow"><span class="${s}">${rotuloSit[s]}</span></div>
     <h2>${esc(p.titulo || l.nome)}</h2>
     ${p.linhafina ? `<p class="fina">${esc(p.linhafina)}</p>` : ""}`;
@@ -319,9 +352,9 @@ function abrir(id){
   st.aberto = id; st.confirmaExcluir = false; st.visitaEdit = null; st.form = false;
   if (decodeURIComponent(location.hash.slice(1)) !== id) location.hash = id;
   render(); painel.scrollTop = 0;
-  if (window.innerWidth <= 860) painel.scrollIntoView({ behavior:"smooth", block:"start" });
+  if (celular()) altura("alto");
   const l = st.lugares[id];
-  if (mapaPronto && l && temPonto(l)) mapa.flyTo({ center:[l.lng, l.lat], zoom: Math.max(mapa.getZoom(), 15), duration: 900 });
+  if (mapaPronto && l && temPonto(l)) mapa.flyTo({ center:[l.lng, l.lat], zoom: Math.max(mapa.getZoom(), 15), duration: 900, padding: folgaMapa() });
 }
 function fechar(){ st.aberto = null; st.confirmaExcluir = false; st.visitaEdit = null; if (location.hash) history.replaceState(null, "", location.pathname + location.search); render(); }
 window.addEventListener("hashchange", () => { const id = decodeURIComponent(location.hash.slice(1)); if (id && st.lugares[id]) abrir(id); else if (!id && st.aberto) fechar(); });
@@ -374,6 +407,7 @@ painel.addEventListener("click", async e => {
     case "b-marcar": guardarRascunho(); st.marcando = true; dica.textContent = "Clique no mapa onde fica o lugar"; dica.hidden = false; break;
     case "b-voltar": fechar(); break;
     case "b-compartilhar": compartilhar(l); break;
+    case "b-ver-mapa": altura("baixo"); setTimeout(() => mapa && mapa.flyTo({ center:[l.lng, l.lat], zoom: 16, duration: 700, padding: folgaMapa() }), 340); break;
     case "b-sortear": sortear(); break;
     case "b-perto": pertoDeMim(); break;
     case "b-sugerir": case "b-sugerir-mais": st.sugerindo = true; st.sugerido = false; render(); document.getElementById("s-nome")?.focus(); break;
