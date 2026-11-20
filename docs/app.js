@@ -327,7 +327,10 @@ function fechar(){ st.aberto = null; st.confirmaExcluir = false; st.visitaEdit =
 window.addEventListener("hashchange", () => { const id = decodeURIComponent(location.hash.slice(1)); if (id && st.lugares[id]) abrir(id); else if (!id && st.aberto) fechar(); });
 
 async function compartilhar(l){
-  const url = location.origin + location.pathname + "#" + encodeURIComponent(l.id);
+  // Cada lugar tem uma página própria (l/<id>/) com a prévia bonita para WhatsApp; lugares novos ainda sem ela usam o link direto.
+  const base = location.origin + location.pathname.replace(/index\.html$/, "");
+  let url = base + "#" + encodeURIComponent(l.id);
+  try { const r = await fetch(base + "l/" + encodeURIComponent(l.id) + "/", { method:"HEAD" }); if (r.ok) url = base + "l/" + encodeURIComponent(l.id) + "/"; } catch(_){}
   const texto = (l.post?.linhafina || l.tipo || "") + "";
   if (navigator.share){ try { await navigator.share({ title: l.nome + " · Histórias por viver", text: texto, url }); return; } catch(e){ if (e && e.name === "AbortError") return; } }
   try { await navigator.clipboard.writeText(url); avisar("Link copiado"); } catch(_){ prompt("Copie o link:", url); }
