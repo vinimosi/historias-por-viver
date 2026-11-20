@@ -234,9 +234,21 @@ form.sugerir{border:0}
 .maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib{margin:0 0 8px 8px}
 @media (max-width:860px){.maplibregl-ctrl-bottom-left{bottom:auto;top:calc(8px + env(safe-area-inset-top, 0px))}}
 .post-botoes{display:flex;gap:6px}
-.marcar-visita{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 22px;padding:12px 14px;border:1px dashed var(--moss);border-radius:6px;background:color-mix(in srgb, var(--moss) 6%, transparent)}
-.marcar-visita .btn.prim{background:var(--moss);border-color:var(--moss)}
-.marcar-visita .btn.prim:hover{filter:brightness(1.1)}
-.marcar-visita span{font-style:italic;color:var(--muted);font-size:15px}
-.visita-form{margin:0 0 22px;padding:16px;border:1px solid var(--moss);border-radius:6px;background:var(--moss-soft)}
-.visita .linha-acoes{margin-top:8px}
+
+/* Barra fixa do "Já fui aqui" no pé do cartão/gaveta */
+.barra-visita{position:sticky;bottom:-48px;z-index:3;margin:28px -30px -48px;padding:14px 30px 18px;
+  background:var(--paper);border-top:1px solid var(--line);box-shadow:0 -10px 24px color-mix(in srgb, var(--ink) 9%, transparent)}
+.barra-visita .btn.cheio{width:100%;justify-content:center;padding:12px 16px;font-size:14px}
+.barra-visita #b-fui{background:var(--moss);border-color:var(--moss);color:var(--paper)}
+.barra-visita #b-fui:hover{filter:brightness(1.08)}
+.barra-visita form{display:flex;flex-direction:column;gap:10px}
+.bv-topo{display:flex;justify-content:space-between;align-items:center}
+.bv-topo b{font:400 22px var(--f-display)}
+.barra-visita textarea{border:1px solid var(--line);border-radius:6px;background:transparent;padding:8px 10px;font:16px var(--f-text);color:var(--ink);resize:none}
+.barra-visita textarea:focus{outline:none;border-color:var(--moss)}
+.barra-visita .notas{justify-content:space-between}
+.barra-visita .notas button{width:44px;height:44px}
+.bv-feito{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font:600 13px var(--f-ui);color:var(--moss)}
+@media (max-width:860px){
+  .barra-visita{bottom:calc(-40px - env(safe-area-inset-bottom, 0px));margin:24px -18px calc(-40px - env(safe-area-inset-bottom, 0px));padding:12px 18px calc(14px + env(safe-area-inset-bottom, 0px))}
+}

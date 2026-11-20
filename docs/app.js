@@ -324,13 +324,7 @@ function telaPost(l){
     <div class="eyebrow"><span class="${s}">${rotuloSit[s]}</span></div>
     <h2>${esc(p.titulo || l.nome)}</h2>
     ${p.linhafina ? `<p class="fina">${esc(p.linhafina)}</p>` : ""}`;
-  if (st.visitaEdit) h += `<form class="form visita-form" id="form-visita"><h2>Como foi?</h2>
-    <div class="notas" role="group" aria-label="Nota de 1 a 5">${[1,2,3,4,5].map(n => `<button type="button" data-nota="${n}" aria-pressed="${st.visitaEdit.nota===n}">${n}</button>`).join("")}</div>
-    <label>Comentário <span>opcional</span><textarea id="v-com" maxlength="800" placeholder="O que pediu, o que achou, se volta">${esc(st.visitaEdit.comentario||"")}</textarea></label>
-    <div class="linha-acoes"><button class="btn prim" type="submit">Guardar visita</button><button class="link" type="button" id="b-vcancel">Cancelar</button></div></form>`;
-  else if (st.podeEditar && s !== "fui") h += `<div class="marcar-visita"><button class="btn prim" id="b-fui">Já fui aqui</button><span>Marque a visita e dê uma nota de 1 a 5.</span></div>`;
-  if (l.visita && !st.visitaEdit) h += `<div class="visita"><b>Minha visita, ${esc(dataBR(l.visita.data))}${l.visita.nota ? " · " + l.visita.nota + "/5" : ""}</b>${l.visita.comentario ? `<p>${esc(l.visita.comentario)}</p>` : ""}
-    ${st.podeEditar ? `<div class="linha-acoes"><button class="link" id="b-editar-visita">Mudar a nota</button><button class="link" id="b-desfazer">Voltar para quero ir</button></div>` : ""}</div>`;
+  if (l.visita) h += `<div class="visita"><b>Minha visita, ${esc(dataBR(l.visita.data))}${l.visita.nota ? " · " + l.visita.nota + "/5" : ""}</b>${l.visita.comentario ? `<p>${esc(l.visita.comentario)}</p>` : ""}</div>`;
   if (fatos.length) h += `<dl class="fatos">${fatos.map(([k,v]) => `<div><dt>${k}</dt><span class="pontos"></span><dd>${esc(v)}</dd></div>`).join("")}</dl>`;
   if (l.porque || urlOk(l.tiktok)) h += `<div class="porque"><b>Por que entrou na lista</b>${l.porque ? esc(l.porque) : ""}${urlOk(l.tiktok) ? `${l.porque ? " " : ""}<a href="${esc(urlOk(l.tiktok))}" target="_blank" rel="noopener">Ver o vídeo</a>` : ""}</div>`;
   if (!l.post) h += `<div class="esperando-box">Este lugar ainda não foi pesquisado.</div>`;
@@ -344,7 +338,19 @@ function telaPost(l){
   if (st.podeEditar) h += `<div class="acoes">${st.confirmaExcluir
       ? `<div class="confirma">Tirar ${esc(l.nome)} da lista? <button class="link perigo" id="b-excluir-sim">Tirar</button><button class="link" id="b-excluir-nao">Manter</button></div>`
       : `<button class="link" id="b-excluir">Tirar da lista</button>`}</div>`;
-  return h + `</article>`;
+  h += `</article>`;
+  // Barra fixa no pé da tela com o "Já fui aqui" (só para quem edita).
+  if (st.podeEditar){
+    h += `<div class="barra-visita">`;
+    if (st.visitaEdit) h += `<form id="form-visita"><div class="bv-topo"><b>Como foi?</b><button class="link" type="button" id="b-vcancel">Cancelar</button></div>
+      <div class="notas" role="group" aria-label="Nota de 1 a 5">${[1,2,3,4,5].map(n => `<button type="button" data-nota="${n}" aria-pressed="${st.visitaEdit.nota===n}">${n}</button>`).join("")}</div>
+      <textarea id="v-com" maxlength="800" rows="2" aria-label="Comentário" placeholder="Comentário, se quiser: o que pediu, o que achou, se volta">${esc(st.visitaEdit.comentario||"")}</textarea>
+      <button class="btn prim cheio" type="submit">Guardar visita</button></form>`;
+    else if (s !== "fui") h += `<button class="btn prim cheio" id="b-fui">Já fui aqui</button>`;
+    else h += `<div class="bv-feito"><span>Você já foi${l.visita?.nota ? ` · nota ${l.visita.nota}/5` : ""}</span><span class="linha-acoes"><button class="link" id="b-editar-visita">Mudar a nota</button><button class="link" id="b-desfazer">Desmarcar</button></span></div>`;
+    h += `</div>`;
+  }
+  return h;
 }
 
 function abrir(id){
